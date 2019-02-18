@@ -33,60 +33,75 @@ JoyMessage Joystick::poll() {
     double scale = -1.0 / (1.0 - m_deadzone) / INT16_MAX;
     double unscaled_deadzone = INT16_MAX * m_deadzone;
 
-    js_event event;
-    fd_set set;
+    bool do_return = false;
 
-    FD_ZERO(&set);
-    FD_SET(m_joy_fd, &set);
+    while(!do_return) {
 
-    static struct timeval tv{0, 100000}; // 100 ms timeout
-    int select_out = select(m_joy_fd + 1, &set, nullptr, nullptr, &tv);
+        js_event event;
+        fd_set set;
 
-    if (select_out == -1) {
-        throw std::runtime_error(std::string("Joystick disconnected"));
-    }
+        FD_ZERO(&set);
+        FD_SET(m_joy_fd, &set);
 
-    if (FD_ISSET(m_joy_fd, &set)) {
+        static struct timeval tv{0, 100000}; // 100 ms timeout
+        int select_out = select(m_joy_fd + 1, &set, nullptr, nullptr, &tv);
 
-        if (read(m_joy_fd, &event, sizeof(js_event)) == -1 && errno != EAGAIN)
+        if (select_out == -1) {
             throw std::runtime_error(std::string("Joystick disconnected"));
-
-        switch (event.type) {
-            case JS_EVENT_BUTTON:
-            case JS_EVENT_BUTTON | JS_EVENT_INIT:
-                if (event.number >= m_joy_msg.buttons.size()) {
-                    int old_size = static_cast<int>(m_joy_msg.buttons.size());
-                    m_joy_msg.buttons.resize(event.number + 1);
-                    for (int i = old_size; i < m_joy_msg.buttons.size(); i++) {
-                        m_joy_msg.buttons[i] = 0.0;
-                    }
-                }
-                m_joy_msg.buttons[event.number] = (event.value ? 1 : 0);
-                break;
-            case JS_EVENT_AXIS:
-                val = event.value;
-                if (event.number >= m_joy_msg.axes.size()) {
-                    int old_size = static_cast<int>(m_joy_msg.axes.size());
-                    m_joy_msg.axes.resize(event.number + 1);
-                    for (int i = old_size; i < m_joy_msg.axes.size(); i++) {
-                        m_joy_msg.axes[i] = 0.0;
-                    }
-                }
-                if (val > unscaled_deadzone)
-                    val -= unscaled_deadzone;
-                else if (val < -unscaled_deadzone)
-                    val += unscaled_deadzone;
-                else
-                    val = 0;
-                m_joy_msg.axes[event.number] = static_cast<float>(val * scale);
-                break;
-            default:
-                break;
         }
-    }
-    std::this_thread::sleep_until(m_wakeup_time);
-    m_wakeup_time = std::chrono::steady_clock::now() + std::chrono::microseconds(m_period);
 
+        if (FD_ISSET(m_joy_fd, &set)) {
+
+            if (read(m_joy_fd, &event, sizeof(js_event)) == -1 && errno != EAGAIN)
+                throw std::runtime_error(std::string("Joystick disconnected"));
+
+            switch (event.type) {
+                case JS_EVENT_BUTTON:
+                case JS_EVENT_BUTTON | JS_EVENT_INIT:
+                    if (event.number >= m_joy_msg.buttons.size()) {
+                        int old_size = static_cast<int>(m_joy_msg.buttons.size());
+                        m_joy_msg.buttons.resize(event.number + 1);
+                        for (int i = old_size; i < m_joy_msg.buttons.size(); i++) {
+                            m_joy_msg.buttons[i] = 0.0;
+                        }
+                    }
+                    m_joy_msg.buttons[event.number] = (event.value ? 1 : 0);
+                    break;
+                case JS_EVENT_AXIS:
+                case JS_EVENT_AXIS | JS_EVENT_INIT:
+                    val = event.value;
+                    if (event.number >= m_joy_msg.axes.size()) {
+                        int old_size = static_cast<int>(m_joy_msg.axes.size());
+                        m_joy_msg.axes.resize(event.number + 1);
+                        for (int i = old_size; i < m_joy_msg.axes.size(); i++) {
+                            m_joy_msg.axes[i] = 0.0;
+                        }
+                    }
+                    if (val > unscaled_deadzone)
+                        val -= unscaled_deadzone;
+                    else if (val < -unscaled_deadzone)
+                        val += unscaled_deadzone;
+                    else
+                        val = 0;
+                    m_joy_msg.axes[event.number] = static_cast<float>(val * scale);
+                    break;
+                default:
+                    std::cout << "----------------------------------------------------------------------" << std::endl;
+                    break;
+            }
+
+            if(!(event.type & JS_EVENT_INIT)){
+                do_return = true;
+            }
+
+        }
+        else{
+            std::this_thread::sleep_until(m_wakeup_time);
+            m_wakeup_time = std::chrono::steady_clock::now() + std::chrono::microseconds(m_period);
+        }
+
+
+    }
     return m_joy_msg;
 }
 
